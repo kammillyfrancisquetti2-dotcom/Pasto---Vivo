@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<title>Pasto Vivo - Plataforma de Manejo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Serif+Display:wght@400&display=swap');
+  
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body, #root { height: 100%; }
+  
+  body { 
+    font-family: 'DM Sans', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+  @keyframes float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-4px); } }
+  @keyframes shimmer { 0% { background-position: -1000px 0; } 100% { background-position: 1000px 0; } }
+  
+  .fade-in { animation: fadeIn 0.4s ease-out; }
+  .slide-in { animation: slideIn 0.3s ease-out; }
+  .sheet-in { animation: slideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
+  .float { animation: float 3s ease-in-out infinite; }
+
+  .pv-card { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+  .pv-card:hover { transform: translateY(-3px); box-shadow: 0 10px 26px rgba(0,0,0,0.10); }
+
+  .pv-btn { transition: transform 0.15s ease, filter 0.15s ease, box-shadow 0.15s ease; }
+  .pv-btn:hover { transform: translateY(-2px); filter: brightness(1.08); box-shadow: 0 6px 16px rgba(0,0,0,0.12); }
+  .pv-btn:active { transform: translateY(0); filter: brightness(0.96); }
+
+  .pv-nav-item { transition: background 0.2s ease, transform 0.15s ease, color 0.2s ease; }
+  .pv-nav-item:hover { transform: translateX(3px); }
+
+  .pv-input { transition: border-color 0.2s ease, box-shadow 0.2s ease; }
+  .pv-input:focus { outline: none; border-color: var(--pv-accent) !important; box-shadow: 0 0 0 3px var(--pv-accent-soft); }
+
+  .pv-animal-row:hover { box-shadow: 0 6px 18px rgba(0,0,0,0.08); }
+  .pv-animal-row { transition: box-shadow 0.2s ease, transform 0.15s ease; }
+  
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(181, 84, 31, 0.25); border-radius: 3px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+// ========== CORES ==========
+const COLORS = {
+  light: { bg: "#f8f5ee", surface: "#ffffff", text: "#221f19", textSoft: "#7d7364", border: "#efe8da", accent: "#b5541f" },
+  dark: { bg: "#15120e", surface: "#211c16", text: "#f6f1e6", textSoft: "#ab9c87", border: "#2e2820", accent: "#e08a4f" },
+};
+
+// tons semânticos e categóricos derivados da paleta principal
+const SEMANTIC = {
+  success: "#3f7d52",
+  info: "#3f7a92",
+  warning: "#c1922f",
+  danger: "#8b3a3a",
+  plum: "#7d5a8c",
+};
+
+function hexToRgba(hex, alpha) {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+// ========== COMPONENTES CUSTOM ==========
+function Glassmorphic({ children, style, className }) {
+  return (
+    <div className={className} style={{
+      background: 'rgba(255, 255, 255, 0.08)',
+      backdropFilter: 'blur(10px)',
+      border: '1px solid rgba(255, 255, 255, 0.15)',
+      borderRadius: '16px',
+      ...style
+    }}>
+      {children}
+    </div>
+  );
+}
+
+function StatCard({ icon, label, value, unit, trend, color, isDark }) {
+  const colors = isDark ? COLORS.dark : COLORS.light;
+  const trendColor = trend > 0 ? SEMANTIC.success : trend < 0 ? SEMANTIC.danger : colors.textSoft;
+  return (
+    <Glassmorphic className="pv-card" style={{
+      padding: '16px',
+      borderRadius: '14px',
+      background: isDark ? hexToRgba(colors.accent, 0.12) : hexToRgba(colors.accent, 0.06),
+      border: isDark ? `1px solid ${hexToRgba(colors.accent, 0.25)}` : `1px solid ${hexToRgba(colors.accent, 0.15)}`,
+      cursor: 'default',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+        <span style={{ fontSize: '20px' }}>{icon}</span>
+        <span style={{ fontSize: '12px', color: colors.textSoft, fontWeight: 600 }}>{label}</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', marginBottom: '6px' }}>
+        <span style={{ fontSize: '22px', fontWeight: 700, color: colors.text }}>{value}</span>
+        <span style={{ fontSize: '12px', color: colors.textSoft }}>{unit}</span>
+      </div>
+      {trend !== 0 && (
+        <div style={{ fontSize: '12px', fontWeight: 600, color: trendColor }}>
+          {trend > 0 ? '↑' : '↓'} {Math.abs(trend)}%
+        </div>
+      )}
+    </Glassmorphic>
+  );
+}
+
+function AlertBanner({ type, message, isDark }) {
+  const colors = isDark ? COLORS.dark : COLORS.light;
+  const alertColors = {
+    success: { bg: hexToRgba(SEMANTIC.success, 0.1), border: `1px solid ${hexToRgba(SEMANTIC.success, 0.3)}`, text: SEMANTIC.success, icon: '✓' },
+    warning: { bg: hexToRgba(SEMANTIC.warning, 0.12), border: `1px solid ${hexToRgba(SEMANTIC.warning, 0.35)}`, text: SEMANTIC.warning, icon: '⚠' },
+    danger: { bg: hexToRgba(SEMANTIC.danger, 0.1), border: `1px solid ${hexToRgba(SEMANTIC.danger, 0.3)}`, text: SEMANTIC.danger, icon: '✕' },
+    info: { bg: hexToRgba(SEMANTIC.info, 0.1), border: `1px solid ${hexToRgba(SEMANTIC.info, 0.3)}`, text: SEMANTIC.info, icon: 'ℹ' },
+  };
+  const alert = alertColors[type];
+  return (
+    <div style={{
+      background: alert.bg,
+      border: alert.border,
+      borderRadius: '12px',
+      padding: '12px 14px',
+      display: 'flex',
+      gap: '10px',
+      alignItems: 'center',
+      fontSize: '13px',
+      color: alert.text,
+      marginBottom: '12px'
+    }}>
+      <span style={{ fontSize: '16px' }}>{alert.icon}</span>
+      <span>{message}</span>
+    </div>
+  );
+}
+
+function LineChart({ data, isDark }) {
+  const canvasRef = useRef(null);
+  const chartRef = useRef(null);
+  
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    
+    if (chartRef.current) chartRef.current.destroy();
+    
+    const colors = isDark ? COLORS.dark : COLORS.light;
+    const gradient = canvasRef.current.getContext('2d').createLinearGradient(0, 0, 0, 300);
+    gradient.addColorStop(0, hexToRgba(colors.accent, 0.3));
+    gradient.addColorStop(1, hexToRgba(colors.accent, 0.05));
+    
+    chartRef.current = new Chart(canvasRef.current, {
+      type: 'line',
+      data: {
+        labels: data.map(d => d.m),
+        datasets: [{
+          label: 'Peso (kg)',
+          data: data.map(d => d.kg),
+          borderColor: colors.accent,
+          backgroundColor: gradient,
+          borderWidth: 2.5,
+          fill: true,
+          tension: 0.4,
+          pointRadius: 4,
+          pointBackgroundColor: colors.accent,
+          pointBorderWidth: 0,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { beginAtZero: false, grid: { color: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' } },
+          x: { grid: { display: false } }
+        }
+      }
+    });
+    
+    return () => { if (chartRef.current) chartRef.current.destroy(); };
+  }, [data, isDark]);
+  
+  return <canvas ref={canvasRef} style={{ maxHeight: '250px' }} />;
+}
+
+// ========== DADOS MOCK ==========
+const mockAnimals = [
+  { id: "F001", nome: "Florinda", raca: "Nelore", peso: 438, saude: 92, status: "Excelente", temp: 38.2, cio: false, avatar: "🐄", historico: [{ mes: "Jun", kg: 420 }, { mes: "Jul", kg: 425 }, { mes: "Ago", kg: 438 }] },
+  { id: "M042", nome: "Marlon", raca: "Nelore", peso: 445, saude: 89, status: "Normal", temp: 38.1, cio: false, avatar: "🐂", historico: [{ mes: "Jun", kg: 430 }, { mes: "Jul", kg: 437 }, { mes: "Ago", kg: 445 }] },
+  { id: "F023", nome: "Flor", raca: "Guzerá", peso: 412, saude: 85, status: "Alerta", temp: 39.1, cio: true, avatar: "🐄", historico: [{ mes: "Jun", kg: 400 }, { mes: "Jul", kg: 405 }, { mes: "Ago", kg: 412 }] },
+];
+
+const weightTrendData = [
+  { m: "Mar", kg: 412 }, { m: "Abr", kg: 418 }, { m: "Mai", kg: 423 },
+  { m: "Jun", kg: 427 }, { m: "Jul", kg: 430 }, { m: "Ago", kg: 436 },
+];
+
+const mockPiquetes = [
+  { nome: "A", status: "pronto", dias: 14, meta: 14, color: SEMANTIC.success, cobertura: 95 },
+  { nome: "B", status: "uso", dias: 5, meta: 7, color: SEMANTIC.info, cobertura: 85 },
+  { nome: "C", status: "descanso", dias: 6, meta: 7, color: SEMANTIC.warning, cobertura: 75 },
+];
+
+const PIQUETE_COLOR_OPTIONS = [SEMANTIC.success, SEMANTIC.info, SEMANTIC.warning, SEMANTIC.danger, SEMANTIC.plum];
+
+// ========== APP PRINCIPAL ==========
+function PastoVivoUltra() {
+  const [isDark, setIsDark] = useState(false);
+  const [tab, setTab] = useState("dashboard");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [animals, setAnimals] = useState(mockAnimals);
+  const [piquetes, setPiquetes] = useState(mockPiquetes);
+  const [search, setSearch] = useState("");
+  const [viewMode, setViewMode] = useState("card");
+  const [editingAnimal, setEditingAnimal] = useState(null);
+  const [showModal, setShowModal] = useState(false);
+  const [selectedAnimal, setSelectedAnimal] = useState(null);
+  const [alerts, setAlerts] = useState([
+    { type: 'success', msg: 'Pegada de carbono reduzida em 14,7%' },
+    { type: 'warning', msg: 'Piquete D com cobertura abaixo do ideal' },
+    { type: 'info', msg: 'Próxima rotação em 3 dias' },
+  ]);
+
+  const colors = isDark ? COLORS.dark : COLORS.light;
+  const filteredAnimals = animals.filter(a => a.nome.toLowerCase().includes(search.toLowerCase()));
+
+  const updateAnimalField = (id, field, value) => {
+    setAnimals(prev => prev.map(a => a.id === id ? { ...a, [field]: value } : a));
+  };
+
+  const removeAnimal = (id) => {
+    setAnimals(prev => prev.filter(a => a.id !== id));
+  };
+
+  const addAnimal = () => {
+    const novoId = "N" + Math.floor(100 + Math.random() * 900);
+    setAnimals(prev => [...prev, {
+      id: novoId, nome: "Novo Animal", raca: "Nelore", peso: 400, saude: 90,
+      status: "Normal", temp: 38.5, cio: false, avatar: "🐄",
+      historico: [{ mes: "Ago", kg: 400 }]
+    }]);
+  };
+
+  const updatePiqueteField = (nome, field, value) => {
+    setPiquetes(prev => prev.map(p => p.nome === nome ? { ...p, [field]: value } : p));
+  };
+
+  const removePiquete = (nome) => {
+    setPiquetes(prev => prev.filter(p => p.nome !== nome));
+  };
+
+  const addPiquete = () => {
+    const letras = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const usados = piquetes.map(p => p.nome);
+    const proxima = letras.split("").find(l => !usados.includes(l)) || (piquetes.length + 1).toString();
+    setPiquetes(prev => [...prev, {
+      nome: proxima, status: "descanso", dias: 0, meta: 7,
+      color: PIQUETE_COLOR_OPTIONS[prev.length % PIQUETE_COLOR_OPTIONS.length], cobertura: 80
+    }]);
+  };
+
+  const exportPDF = () => {
+    const element = document.getElementById('pdf-content');
+    const opt = { margin: 10, filename: 'relatorio-rebanho.pdf', image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2 }, jsPDF: { orientation: 'portrait', unit: 'mm', format: 'a4' } };
+    html2pdf().set(opt).from(element).save();
+  };
+
+  const exportCSV = () => {
+    const csv = [
+      ['ID', 'Nome', 'Raça', 'Peso (kg)', 'Saúde (%)', 'Status', 'Temperatura (°C)', 'Cio'].join(','),
+      ...animals.map(a => [a.id, a.nome, a.raca, a.peso, a.saude, a.status, a.temp, a.cio ? 'Sim' : 'Não'].join(','))
+    ].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'rebanho.csv';
+    a.click();
+  };
+
+  return (
+    <div style={{
+      display: 'flex',
+      height: '100vh',
+      background: isDark ? 'linear-gradient(135deg, #15120e 0%, #211c16 100%)' : 'linear-gradient(135deg, #f8f5ee 0%, #eee6d4 100%)',
+      color: colors.text,
+      transition: 'all 0.3s',
+      '--pv-accent': colors.accent,
+      '--pv-accent-soft': hexToRgba(colors.accent, 0.25),
+    }}>
+      {/* ========== SIDEBAR ========== */}
+      {sidebarOpen && (
+        <div className="slide-in" style={{
+          width: '260px',
+          background: isDark ? 'rgba(26, 26, 24, 0.9)' : 'rgba(255, 255, 255, 0.9)',
+          borderRight: `1px solid ${colors.border}`,
+          padding: '20px',
+          overflowY: 'auto',
+          backdropFilter: 'blur(10px)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '30px' }}>
+            <span style={{ fontSize: '28px' }}>🌾</span>
+            <div>
+              <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>Pasto Vivo</h1>
+            </div>
+          </div>
+
+          <nav style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {[
+              { id: 'dashboard', label: 'Dashboard', icon: '📊' },
+              { id: 'rebanho', label: 'Rebanho', icon: '🐄' },
+              { id: 'piquetes', label: 'Piquetes', icon: '🌾' },
+              { id: 'alerts', label: 'Alertas', icon: '🔔' },
+              { id: 'relatorios', label: 'Relatórios', icon: '📄' },
+              { id: 'config', label: 'Configurações', icon: '⚙️' },
+            ].map(item => (
+              <button key={item.id} onClick={() => setTab(item.id)} className="pv-btn pv-nav-item" style={{
+                padding: '12px 14px',
+                background: tab === item.id ? colors.accent + '20' : 'transparent',
+                border: 'none',
+                borderRadius: '10px',
+                color: tab === item.id ? colors.accent : colors.textSoft,
+                fontSize: '14px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                textAlign: 'left',
+                transition: 'all 0.2s',
+                display: 'flex',
+                gap: '10px',
+                alignItems: 'center'
+              }}>
+                <span style={{ fontSize: '18px' }}>{item.icon}</span>
+                {item.label}
+              </button>
+            ))}
+          </nav>
+
+          <hr style={{ border: 'none', borderTop: `1px solid ${colors.border}`, margin: '20px 0' }} />
+
+          <button onClick={() => setIsDark(!isDark)} className="pv-btn" style={{
+            width: '100%',
+            padding: '10px',
+            background: colors.accent + '15',
+            border: `1px solid ${colors.accent}30`,
+            borderRadius: '10px',
+            color: colors.text,
+            cursor: 'pointer',
+            fontWeight: 600,
+            fontSize: '13px'
+          }}>
+            {isDark ? '☀️ Claro' : '🌙 Escuro'}
+          </button>
+        </div>
+      )}
+
+      {/* ========== MAIN CONTENT ========== */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* HEADER */}
+        <header style={{
+          padding: '16px 24px',
+          background: isDark ? 'rgba(26, 26, 24, 0.5)' : 'rgba(255, 255, 255, 0.5)',
+          borderBottom: `1px solid ${colors.border}`,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          backdropFilter: 'blur(10px)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="pv-btn" style={{
+              background: 'none',
+              border: 'none',
+              fontSize: '24px',
+              cursor: 'pointer'
+            }}>
+              {sidebarOpen ? '◀' : '▶'}
+            </button>
+            <input type="text" placeholder="🔍 Buscar animal..." value={search} onChange={(e) => setSearch(e.target.value)} className="pv-input" style={{
+              padding: '10px 14px',
+              background: colors.border,
+              border: `1px solid ${colors.border}`,
+              borderRadius: '10px',
+              color: colors.text,
+              fontSize: '13px',
+              width: '250px',
+              fontFamily: 'inherit'
+            }} />
+          </div>
+
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <button onClick={() => setViewMode(viewMode === 'card' ? 'list' : 'card')} className="pv-btn" style={{
+              padding: '10px 14px',
+              background: colors.accent + '15',
+              border: 'none',
+              borderRadius: '10px',
+              color: colors.accent,
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: 600
+            }}>
+              {viewMode === 'card' ? '📋' : '🎴'} {viewMode === 'card' ? 'Lista' : 'Cards'}
+            </button>
+            <button onClick={exportPDF} className="pv-btn" style={{
+              padding: '10px 14px',
+              background: hexToRgba(SEMANTIC.danger, 0.15),
+              border: 'none',
+              borderRadius: '10px',
+              color: SEMANTIC.danger,
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: 600
+            }}>
+              📥 PDF
+            </button>
+            <button onClick={exportCSV} className="pv-btn" style={{
+              padding: '10px 14px',
+              background: hexToRgba(SEMANTIC.success, 0.15),
+              border: 'none',
+              borderRadius: '10px',
+              color: SEMANTIC.success,
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: 600
+            }}>
+              📥 CSV
+            </button>
+          </div>
+        </header>
+
+        {/* CONTENT */}
+        <main style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
+          {tab === 'dashboard' && (
+            <div className="fade-in">
+              <h2 style={{ fontSize: '28px', fontFamily: "'DM Serif Display'", fontWeight: 400, marginBottom: '20px' }}>Dashboard Executivo</h2>
+
+              {/* Alertas */}
+              <div style={{ marginBottom: '24px' }}>
+                {alerts.map((a, i) => <AlertBanner key={i} type={a.type} message={a.msg} isDark={isDark} />)}
+              </div>
+
+              {/* Stats Grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginBottom: '24px' }}>
+                <StatCard icon="⚖️" label="Peso Médio" value="436" unit="kg" trend={5.8} isDark={isDark} />
+                <StatCard icon="💨" label="Pegada C" value="15,7" unit="kg CO₂e" trend={-14.7} isDark={isDark} />
+                <StatCard icon="❤️" label="Saúde" value="89" unit="/100" trend={14.1} isDark={isDark} />
+                <StatCard icon="💧" label="Água" value="38" unit="L/dia" trend={-9.5} isDark={isDark} />
+              </div>
+
+              {/* Gráfico */}
+              <Glassmorphic className="pv-card" style={{ padding: '20px', marginBottom: '24px' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: 700, marginBottom: '16px', color: colors.text }}>Tendência de Peso (6 meses)</h3>
+                <LineChart data={weightTrendData} isDark={isDark} />
+              </Glassmorphic>
+
+              {/* Piquetes */}
+              <h3 style={{ fontSize: '16px', fontWeight: 700, marginBottom: '12px', color: colors.text }}>Status dos Piquetes</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px' }}>
+                {piquetes.map(p => (
+                  <Glassmorphic key={p.nome} className="pv-card" style={{ padding: '16px', background: isDark ? hexToRgba(p.color, 0.14) : hexToRgba(p.color, 0.08), cursor: 'pointer' }} onClick={() => {}}>
+                    <div style={{ fontSize: '20px', fontWeight: 700, color: p.color, marginBottom: '8px' }}>Piquete {p.nome}</div>
+                    <div style={{ fontSize: '12px', color: colors.textSoft, marginBottom: '8px' }}>{p.dias}/{p.meta} dias</div>
+                    <div style={{ height: '4px', background: colors.border, borderRadius: '2px', marginBottom: '8px', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', background: p.color, width: `${(p.dias/p.meta)*100}%` }} />
+                    </div>
+                    <div style={{ fontSize: '11px', color: colors.textSoft }}>Cobertura: {p.cobertura}%</div>
+                  </Glassmorphic>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {tab === 'rebanho' && (
+            <div className="fade-in">
+              <h2 style={{ fontSize: '28px', fontFamily: "'DM Serif Display'", fontWeight: 400, marginBottom: '20px' }}>Rebanho</h2>
+              
+              <div style={{ display: viewMode === 'card' ? 'grid' : 'flex', gridTemplateColumns: viewMode === 'card' ? 'repeat(3, 1fr)' : undefined, gap: '14px', flexDirection: viewMode === 'list' ? 'column' : undefined }}>
+                {filteredAnimals.map(animal => (
+                  <Glassmorphic key={animal.id} onClick={() => setSelectedAnimal(animal)} className="pv-card" style={{
+                    padding: '16px',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    display: 'flex',
+                    gap: '14px',
+                    flexDirection: viewMode === 'list' ? 'row' : 'column',
+                  }}>
+                    <div style={{ fontSize: '40px' }}>{animal.avatar}</div>
+                    <div style={{ flex: 1 }}>
+                      <h3 style={{ fontSize: '14px', fontWeight: 700, color: colors.text, margin: 0, marginBottom: '4px' }}>{animal.nome}</h3>
+                      <p style={{ fontSize: '12px', color: colors.textSoft, margin: '0 0 8px' }}>{animal.raca} • {animal.id}</p>
+                      <div style={{ display: 'flex', gap: '12px', fontSize: '12px', color: colors.textSoft }}>
+                        <span>⚖️ {animal.peso}kg</span>
+                        <span>❤️ {animal.saude}%</span>
+                        <span>🌡️ {animal.temp}°C</span>
+                      </div>
+                    </div>
+                    {animal.cio && <div style={{ fontSize: '20px' }}>🔴</div>}
+                  </Glassmorphic>
+                ))}
+              </div>
+
+              {selectedAnimal && (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', zIndex: 1000 }} onClick={() => setSelectedAnimal(null)}>
+                  <Glassmorphic className="sheet-in" style={{
+                    width: '100%',
+                    maxWidth: '600px',
+                    borderRadius: '24px 24px 0 0',
+                    padding: '24px',
+                    margin: '0 auto'
+                  }} onClick={(e) => e.stopPropagation()}>
+                    <h2 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '16px', color: colors.text }}>{selectedAnimal.nome}</h2>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+                      <div style={{ background: colors.border, padding: '12px', borderRadius: '10px' }}>
+                        <div style={{ fontSize: '11px', color: colors.textSoft, marginBottom: '4px' }}>Peso</div>
+                        <div style={{ fontSize: '18px', fontWeight: 700, color: colors.text }}>{selectedAnimal.peso} kg</div>
+                      </div>
+                      <div style={{ background: colors.border, padding: '12px', borderRadius: '10px' }}>
+                        <div style={{ fontSize: '11px', color: colors.textSoft, marginBottom: '4px' }}>Saúde</div>
+                        <div style={{ fontSize: '18px', fontWeight: 700, color: colors.text }}>{selectedAnimal.saude}%</div>
+                      </div>
+                    </div>
+                    <button onClick={() => { setEditingAnimal(selectedAnimal); setSelectedAnimal(null); }} className="pv-btn" style={{
+                      width: '100%',
+                      padding: '12px',
+                      background: colors.accent,
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '10px',
+                      fontWeight: 700,
+                      cursor: 'pointer'
+                    }}>
+                      ✏️ Editar
+                    </button>
+                  </Glassmorphic>
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === 'piquetes' && (
+            <div className="fade-in">
+              <h2 style={{ fontSize: '28px', fontFamily: "'DM Serif Display'", fontWeight: 400, marginBottom: '20px' }}>Gestão de Piquetes</h2>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '14px' }}>
+                {piquetes.map(p => (
+                  <Glassmorphic key={p.nome} className="pv-card" style={{ padding: '20px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '16px' }}>
+                      <div>
+                        <h3 style={{ fontSize: '20px', fontWeight: 700, color: p.color, margin: 0, marginBottom: '4px' }}>Piquete {p.nome}</h3>
+                        <p style={{ fontSize: '12px', color: colors.textSoft, margin: 0 }}>{p.status === 'pronto' ? 'Pronto' : p.status === 'uso' ? 'Em uso' : 'Descanso'}</p>
+                      </div>
+                    </div>
+                    <div style={{ marginBottom: '12px' }}>
+                      <div style={{ fontSize: '12px', color: colors.textSoft, marginBottom: '6px', display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Ciclo</span>
+                        <span>{p.dias} / {p.meta} dias</span>
+                      </div>
+                      <div style={{ height: '6px', background: colors.border, borderRadius: '3px', overflow: 'hidden' }}>
+                        <div style={{ height: '100%', background: p.color, width: `${(p.dias/p.meta)*100}%`, transition: 'width 0.3s' }} />
+                      </div>
+                    </div>
+                    <div style={{ padding: '12px', background: colors.border, borderRadius: '10px', fontSize: '12px', color: colors.text }}>
+                      📊 Cobertura vegetal: <strong>{p.cobertura}%</strong>
+                    </div>
+                  </Glassmorphic>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {tab === 'alerts' && (
+            <div className="fade-in">
+              <h2 style={{ fontSize: '28px', fontFamily: "'DM Serif Display'", fontWeight: 400, marginBottom: '20px' }}>Sistema de Alertas</h2>
+              <Glassmorphic className="pv-card" style={{ padding: '20px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {alerts.map((a, i) => <AlertBanner key={i} type={a.type} message={a.msg} isDark={isDark} />)}
+                </div>
+                <hr style={{ border: 'none', borderTop: `1px solid ${colors.border}`, margin: '20px 0' }} />
+                <p style={{ fontSize: '12px', color: colors.textSoft, margin: 0 }}>
+                  💡 Dica: Customize seus alertas nas configurações para receber notificações de eventos críticos
+                </p>
+              </Glassmorphic>
+            </div>
+          )}
+
+          {tab === 'relatorios' && (
+            <div className="fade-in">
+              <h2 style={{ fontSize: '28px', fontFamily: "'DM Serif Display'", fontWeight: 400, marginBottom: '20px' }}>Relatórios & Análises</h2>
+              <Glassmorphic className="pv-card" style={{ padding: '20px' }}>
+                <h3 style={{ fontSize: '16px', fontWeight: 700, marginBottom: '16px', color: colors.text }}>Gerar Relatórios</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <button onClick={exportPDF} className="pv-btn" style={{
+                    padding: '14px',
+                    background: colors.accent,
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '10px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}>
+                    📄 Exportar PDF
+                  </button>
+                  <button onClick={exportCSV} className="pv-btn" style={{
+                    padding: '14px',
+                    background: SEMANTIC.success,
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '10px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}>
+                    📊 Exportar CSV
+                  </button>
+                </div>
+              </Glassmorphic>
+            </div>
+          )}
+
+          {tab === 'config' && (
+            <div className="fade-in">
+              <h2 style={{ fontSize: '28px', fontFamily: "'DM Serif Display'", fontWeight: 400, marginBottom: '20px' }}>Configurações</h2>
+
+              {/* ===== PIQUETES ===== */}
+              <Glassmorphic className="pv-card" style={{ padding: '20px', marginBottom: '24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <h3 style={{ fontSize: '16px', fontWeight: 700, color: colors.text, margin: 0 }}>🌾 Piquetes</h3>
+                  <button onClick={addPiquete} className="pv-btn" style={{
+                    padding: '8px 14px', background: colors.accent, color: '#fff', border: 'none',
+                    borderRadius: '8px', fontWeight: 700, fontSize: '12px', cursor: 'pointer'
+                  }}>+ Novo piquete</button>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {piquetes.map(p => (
+                    <div key={p.nome} className="pv-animal-row" style={{
+                      display: 'grid', gridTemplateColumns: '70px 1fr 100px 100px 90px 40px', gap: '10px', alignItems: 'center',
+                      padding: '12px', background: colors.border, borderRadius: '10px'
+                    }}>
+                      <input type="text" value={p.nome} maxLength={2} onChange={(e) => updatePiqueteField(p.nome, 'nome', e.target.value.toUpperCase())} className="pv-input" style={{
+                        width: '100%', padding: '8px', borderRadius: '8px', border: `1px solid ${colors.border}`,
+                        background: colors.surface, color: colors.text, fontSize: '13px', fontWeight: 700, textAlign: 'center'
+                      }} />
+                      <select value={p.status} onChange={(e) => updatePiqueteField(p.nome, 'status', e.target.value)} className="pv-input" style={{
+                        width: '100%', padding: '8px', borderRadius: '8px', border: `1px solid ${colors.border}`,
+                        background: colors.surface, color: colors.text, fontSize: '13px'
+                      }}>
+                        <option value="pronto">Pronto</option>
+                        <option value="uso">Em uso</option>
+                        <option value="descanso">Descanso</option>
+                      </select>
+                      <input type="number" value={p.dias} min={0} onChange={(e) => updatePiqueteField(p.nome, 'dias', Number(e.target.value))} placeholder="Dias" className="pv-input" style={{
+                        width: '100%', padding: '8px', borderRadius: '8px', border: `1px solid ${colors.border}`,
+                        background: colors.surface, color: colors.text, fontSize: '13px'
+                      }} />
+                      <input type="number" value={p.meta} min={1} onChange={(e) => updatePiqueteField(p.nome, 'meta', Number(e.target.value))} placeholder="Meta" className="pv-input" style={{
+                        width: '100%', padding: '8px', borderRadius: '8px', border: `1px solid ${colors.border}`,
+                        background: colors.surface, color: colors.text, fontSize: '13px'
+                      }} />
+                      <input type="number" value={p.cobertura} min={0} max={100} onChange={(e) => updatePiqueteField(p.nome, 'cobertura', Number(e.target.value))} placeholder="Cobertura %" className="pv-input" style={{
+                        width: '100%', padding: '8px', borderRadius: '8px', border: `1px solid ${colors.border}`,
+                        background: colors.surface, color: colors.text, fontSize: '13px'
+                      }} />
+                      <button onClick={() => removePiquete(p.nome)} title="Remover piquete" className="pv-btn" style={{
+                        background: hexToRgba(SEMANTIC.danger, 0.1), border: 'none', borderRadius: '8px',
+                        color: SEMANTIC.danger, cursor: 'pointer', padding: '8px', fontSize: '14px'
+                      }}>🗑️</button>
+                    </div>
+                  ))}
+                  {piquetes.length === 0 && (
+                    <p style={{ fontSize: '13px', color: colors.textSoft, margin: 0 }}>Nenhum piquete cadastrado.</p>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: '16px', fontSize: '11px', color: colors.textSoft, marginTop: '10px' }}>
+                  <span>Sigla</span><span style={{ marginLeft: '20px' }}>Status</span>
+                </div>
+              </Glassmorphic>
+
+              {/* ===== REBANHO ===== */}
+              <Glassmorphic className="pv-card" style={{ padding: '20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <h3 style={{ fontSize: '16px', fontWeight: 700, color: colors.text, margin: 0 }}>🐄 Rebanho</h3>
+                  <button onClick={addAnimal} className="pv-btn" style={{
+                    padding: '8px 14px', background: colors.accent, color: '#fff', border: 'none',
+                    borderRadius: '8px', fontWeight: 700, fontSize: '12px', cursor: 'pointer'
+                  }}>+ Novo animal</button>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {animals.map(a => (
+                    <div key={a.id} className="pv-animal-row" style={{ padding: '14px', background: colors.border, borderRadius: '10px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                        <span style={{ fontSize: '12px', fontWeight: 700, color: colors.textSoft }}>{a.id}</span>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: colors.textSoft }}>
+                          <input type="checkbox" checked={a.cio} onChange={(e) => updateAnimalField(a.id, 'cio', e.target.checked)} />
+                          Em cio
+                        </label>
+                        <button onClick={() => removeAnimal(a.id)} title="Remover animal" className="pv-btn" style={{
+                          background: hexToRgba(SEMANTIC.danger, 0.1), border: 'none', borderRadius: '8px',
+                          color: SEMANTIC.danger, cursor: 'pointer', padding: '6px 8px', fontSize: '13px'
+                        }}>🗑️</button>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '10px' }}>
+                        <div>
+                          <div style={{ fontSize: '10px', color: colors.textSoft, marginBottom: '4px' }}>Nome</div>
+                          <input type="text" value={a.nome} onChange={(e) => updateAnimalField(a.id, 'nome', e.target.value)} className="pv-input" style={{
+                            width: '100%', padding: '8px', borderRadius: '8px', border: `1px solid ${colors.border}`,
+                            background: colors.surface, color: colors.text, fontSize: '13px'
+                          }} />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '10px', color: colors.textSoft, marginBottom: '4px' }}>Raça</div>
+                          <input type="text" value={a.raca} onChange={(e) => updateAnimalField(a.id, 'raca', e.target.value)} className="pv-input" style={{
+                            width: '100%', padding: '8px', borderRadius: '8px', border: `1px solid ${colors.border}`,
+                            background: colors.surface, color: colors.text, fontSize: '13px'
+                          }} />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '10px', color: colors.textSoft, marginBottom: '4px' }}>Peso (kg)</div>
+                          <input type="number" value={a.peso} onChange={(e) => updateAnimalField(a.id, 'peso', Number(e.target.value))} className="pv-input" style={{
+                            width: '100%', padding: '8px', borderRadius: '8px', border: `1px solid ${colors.border}`,
+                            background: colors.surface, color: colors.text, fontSize: '13px'
+                          }} />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '10px', color: colors.textSoft, marginBottom: '4px' }}>Saúde (%)</div>
+                          <input type="number" value={a.saude} min={0} max={100} onChange={(e) => updateAnimalField(a.id, 'saude', Number(e.target.value))} className="pv-input" style={{
+                            width: '100%', padding: '8px', borderRadius: '8px', border: `1px solid ${colors.border}`,
+                            background: colors.surface, color: colors.text, fontSize: '13px'
+                          }} />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '10px', color: colors.textSoft, marginBottom: '4px' }}>Temp (°C)</div>
+                          <input type="number" step="0.1" value={a.temp} onChange={(e) => updateAnimalField(a.id, 'temp', Number(e.target.value))} className="pv-input" style={{
+                            width: '100%', padding: '8px', borderRadius: '8px', border: `1px solid ${colors.border}`,
+                            background: colors.surface, color: colors.text, fontSize: '13px'
+                          }} />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {animals.length === 0 && (
+                    <p style={{ fontSize: '13px', color: colors.textSoft, margin: 0 }}>Nenhum animal cadastrado.</p>
+                  )}
+                </div>
+              </Glassmorphic>
+            </div>
+          )}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<PastoVivoUltra />);
+</script>
+</body>
+</html>
